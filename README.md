@@ -10,7 +10,7 @@ that builds the Chart.js config. Nothing is uploaded anywhere.
 
 ## Screenshot
 
-<!-- Add screenshot here -->
+![DataViz dashboard](screenshots/dashboard.png)
 
 ## Features
 
