@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>chart-dashboard</title>
+  <meta name="description" content="chart-dashboard — local CSV/Excel to charts. DataViz in your browser, nothing is uploaded." />
+
+  <!-- Fonts: Inter + JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- Libraries: Tailwind, Chart.js, SheetJS (Excel), Lucide (icons) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: '#0A0A0A', surface: '#141414', line: '#262626',
+            fg: '#EDEDED', muted: '#737373', accent: '#3B82F6',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    :root {
+      --bg:#0A0A0A; --surface:#141414; --line:#262626;
+      --fg:#EDEDED; --muted:#737373; --accent:#3B82F6;
+      color-scheme: dark;
+    }
+    html, body { height: 100%; }
+    body {
+      background: var(--bg); color: var(--fg);
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 14px; font-weight: 400;
+      -webkit-font-smoothing: antialiased;
+    }
+    h1, h2, h3 { font-weight: 500; letter-spacing: -0.02em; }
+    .font-mono, td, th, kbd { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+    /* visible focus rings for keyboard nav */
+    button:focus-visible, [role="button"]:focus-visible,
+    select:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--accent); outline-offset: 1px;
+    }
+
+    /* scrollbars */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: #2E2E2E; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3A3A3A; }
+
+    select option { background: var(--surface); color: var(--fg); }
+
+    /* toast: fade only, top-right */
+    #toast {
+      position: fixed; top: 24px; right: 24px; z-index: 60;
+      display: flex; align-items: center; gap: 10px;
+      max-width: 380px; padding: 10px 14px;
+      background: var(--surface); border: 1px solid var(--line);
+      border-radius: 6px; font-size: 13px;
+      box-shadow: 0 6px 24px rgba(0,0,0,.5);
+      opacity: 0; pointer-events: none;
+      transition: opacity 180ms ease;
+    }
+    #toast.show { opacity: 1; }
+    #toast .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+    #toast.success .dot { background: #34D399; }
+    #toast.error   .dot { background: #F87171; }
+    #toast.info    .dot { background: #9CA3AF; }
+
+    /* dropzone drag state */
+    #dropzone.drag { border-color: var(--accent); background: #181818; }
+
+    /* chart-type dropdown */
+    #type-menu button:hover { background: #1B1B1B; }
+
+    /* keyboard focus rings */
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
+  </style>
+</head>
+<body class="bg-bg text-fg flex flex-col md:h-screen md:overflow-hidden">
+
+  <!-- ===== Top bar ===== -->
+  <header class="h-12 flex-none border-b border-line flex items-center justify-between px-4 sm:px-6">
+    <div class="flex items-center gap-2">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <rect x="1"    y="8"    width="3.5" height="7"    fill="#3B82F6"/>
+        <rect x="6.25" y="4.5"  width="3.5" height="10.5" fill="#737373"/>
+        <rect x="11.5" y="1.5"  width="3.5" height="13.5" fill="#4D4D4D"/>
+      </svg>
+      <span class="font-medium tracking-tight text-sm">chart-dashboard</span>
+    </div>
+    <div class="flex items-center gap-4">
+      <button id="kbd-upload" type="button" aria-label="Upload file"
+        class="hidden sm:inline-flex items-center gap-2 text-xs text-muted transition hover:text-fg">
+        <kbd class="rounded border border-line bg-surface px-1.5 py-0.5 text-[10px]">⌘K</kbd> upload
+      </button>
+      <div role="status" aria-live="polite" class="flex items-center gap-2 text-xs text-muted">
+        <span id="status-dot" class="h-1.5 w-1.5 flex-none rounded-full bg-muted"></span>
+        <span id="status-text">checking…</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== Shell ===== -->
+  <div class="flex flex-1 flex-col md:flex-row min-h-0">
+
+    <!-- ===== Sidebar (280px) ===== -->
+    <aside class="w-full md:w-[280px] md:flex-none border-b border-line md:border-b-0 md:border-r p-4 sm:p-5 flex flex-col gap-6 overflow-y-auto">
+
+      <!-- Data -->
+      <section class="space-y-3">
+        <h2 class="text-[11px] font-medium uppercase tracking-wider text-muted">Data</h2>
+        <div id="dropzone" role="button" tabindex="0" aria-label="Upload CSV or Excel file"
+          class="cursor-pointer rounded border border-dashed border-line p-4 text-center transition hover:border-accent hover:bg-[#181818]">
+          <i data-lucide="upload-cloud" class="mx-auto mb-2 h-5 w-5 text-muted"></i>
+          <p class="text-fg">Drop CSV or Excel here</p>
+          <p class="mt-1 text-xs text-muted">.csv, .xls, .xlsx · stays in browser</p>
+          <input id="file-input" type="file" class="hidden" />
+        </div>
+        <button id="sample-btn" type="button" aria-label="Load example data"
+          class="flex w-full items-center justify-center gap-2 rounded border border-line px-3 py-2 text-sm text-muted transition hover:border-accent hover:text-fg">
+          <i data-lucide="file-plus" class="h-4 w-4"></i> Load example
+        </button>
+        <div id="file-info" class="hidden space-y-1.5 rounded border border-line bg-surface p-3 text-xs">
+          <div class="flex justify-between gap-2"><span class="text-muted">File</span><span id="fi-name" class="font-mono truncate" title=""></span></div>
+          <div class="flex justify-between"><span class="text-muted">Size</span><span id="fi-size" class="font-mono"></span></div>
+          <div class="flex justify-between"><span class="text-muted">Rows</span><span id="fi-rows" class="font-mono"></span></div>
+          <div class="flex justify-between"><span class="text-muted">Columns</span><span id="fi-cols" class="font-mono"></span></div>
+          <div id="sheet-note" class="hidden border-t border-line pt-1.5 text-muted">
+            Using sheet: <span id="sheet-name" class="font-mono text-fg"></span>
+          </div>
+        </div>
+        <p id="fi-empty" class="text-xs text-muted">No file loaded</p>
+      </section>
+
+      <!-- Chart -->
+      <section class="space-y-3">
+        <h2 class="text-[11px] font-medium uppercase tracking-wider text-muted">Chart</h2>
+        <div class="relative">
+          <label class="mb-1.5 block text-xs text-muted">Type</label>
+          <button id="type-btn" type="button" aria-label="Select chart type" aria-haspopup="true" aria-expanded="false"
+            class="flex w-full items-center justify-between rounded border border-line bg-surface px-3 py-2 text-sm transition hover:border-accent">
+            <span class="flex items-center gap-2"><i id="type-icon" data-lucide="bar-chart-3" class="h-4 w-4 text-accent"></i><span id="type-label">Bar</span></span>
+            <i id="type-chevron" data-lucide="chevron-down" class="h-4 w-4 text-muted transition-transform"></i>
+          </button>
+          <div id="type-menu" class="absolute right-0 top-full z-30 mt-1 hidden w-44 rounded border border-line bg-surface py-1 shadow-2xl">
+            <button type="button" data-type="bar" class="type-opt flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm"><i data-lucide="bar-chart-3" class="h-4 w-4 text-muted"></i> Bar</button>
+            <button type="button" data-type="line" class="type-opt flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm"><i data-lucide="line-chart" class="h-4 w-4 text-muted"></i> Line</button>
+            <button type="button" data-type="pie" class="type-opt flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm"><i data-lucide="pie-chart" class="h-4 w-4 text-muted"></i> Pie</button>
+            <button type="button" data-type="scatter" class="type-opt flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm"><i data-lucide="chart-scatter" class="h-4 w-4 text-muted"></i> Scatter</button>
+            <button type="button" data-type="area" class="type-opt flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm"><i data-lucide="chart-spline" class="h-4 w-4 text-muted"></i> Area</button>
+          </div>
+          <input id="chart-type" type="hidden" value="bar" />
+        </div>
+        <div class="space-y-1.5">
+          <label for="x-axis" class="block text-xs text-muted">X axis</label>
+          <select id="x-axis" class="w-full rounded border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-accent"></select>
+        </div>
+        <div class="space-y-1.5">
+          <label for="y-axis" class="block text-xs text-muted">Y axis</label>
+          <select id="y-axis" class="w-full rounded border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-accent"></select>
+        </div>
+        <button id="generate-btn" type="button" aria-label="Generate chart" disabled
+          class="flex w-full items-center justify-center gap-2 rounded bg-accent px-3 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">
+          <i data-lucide="play" class="h-4 w-4"></i>
+          <i id="gen-spin" data-lucide="loader" class="hidden h-4 w-4 animate-spin"></i>
+          Generate
+        </button>
+      </section>
+    </aside>
+
+    <!-- ===== Main ===== -->
+    <main class="flex min-h-0 flex-1 flex-col">
+
+      <!-- Preview -->
+      <section class="flex flex-none flex-col border-b border-line p-5 md:max-h-[42%]">
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="flex items-center gap-2 text-sm font-medium"><i data-lucide="table-2" class="h-4 w-4 text-muted"></i> Data</h2>
+          <span class="flex items-center gap-1 text-xs text-muted" title="Preview only shows the first 10 rows">
+            <span id="row-count"></span>
+            <i data-lucide="info" class="h-3 w-3"></i>
+          </span>
+        </div>
+        <div class="relative min-h-0 flex-1 overflow-auto rounded border border-line">
+          <table class="w-full border-collapse text-xs">
+            <thead id="table-head" class="sticky top-0 z-10 bg-surface"></thead>
+            <tbody id="table-body"></tbody>
+          </table>
+          <div id="empty-state" class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-bg text-muted">
+            <svg width="72" height="44" viewBox="0 0 72 44" fill="none" stroke="#3A3A3A" stroke-width="1.5" aria-hidden="true">
+              <line x1="6" y1="38" x2="66" y2="38"/>
+              <rect x="11" y="24" width="8" height="14"/>
+              <rect x="26" y="14" width="8" height="24"/>
+              <rect x="41" y="28" width="8" height="10"/>
+              <rect x="56" y="8"  width="8" height="30"/>
+            </svg>
+            <p class="text-sm">No file loaded</p>
+            <p class="text-xs">Upload a CSV or Excel file to preview it here</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Chart -->
+      <section class="flex min-h-0 flex-1 flex-col p-4 sm:p-5">
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="flex items-center gap-2 text-sm font-medium"><i data-lucide="bar-chart-3" class="h-4 w-4 text-muted"></i> Chart</h2>
+        </div>
+        <div id="chart-error" class="hidden mb-3 rounded border border-red-900/70 bg-red-950/40 px-3 py-2 text-xs text-red-300"></div>
+        <div id="chart-card" class="min-h-0 flex-1 items-center justify-center rounded border border-line p-6" style="display:none">
+          <div id="chart-display" class="w-full" style="aspect-ratio:16/9;max-height:100%;">
+            <canvas id="chart-canvas"></canvas>
+          </div>
+        </div>
+        <div id="chart-empty" class="min-h-0 flex-1 flex-col items-center justify-center gap-2 text-muted" style="display:flex">
+          <svg width="72" height="44" viewBox="0 0 72 44" fill="none" stroke="#3A3A3A" stroke-width="1.5" aria-hidden="true">
+            <line x1="6" y1="38" x2="66" y2="38"/>
+            <rect x="11" y="24" width="8" height="14"/>
+            <rect x="26" y="14" width="8" height="24"/>
+            <rect x="41" y="28" width="8" height="10"/>
+            <rect x="56" y="8"  width="8" height="30"/>
+          </svg>
+          <p class="text-sm">No chart yet</p>
+          <p class="text-xs">Load data from sidebar to get started</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast"><span class="dot"></span><span id="toast-msg"></span></div>
+
+  <script>
+    'use strict';
+    const RENDERER_URL = 'http://localhost:8787/api/chart';
+    const HEALTH_URL = 'http://localhost:8787/api/health';
+    const ACCEPT = '.csv,.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    const CHART_TYPES = [
+      { value: 'bar', label: 'Bar', icon: 'bar-chart-3' },
+      { value: 'line', label: 'Line', icon: 'line-chart' },
+      { value: 'pie', label: 'Pie', icon: 'pie-chart' },
+      { value: 'scatter', label: 'Scatter', icon: 'chart-scatter' },
+      { value: 'area', label: 'Area', icon: 'chart-spline' },
+    ];
+    const MUTED = ['#6E8CAD', '#8AA0C0', '#A5B4C9', '#7E9CB8', '#93A5BE', '#B4BFD0', '#7F9C8E', '#A6B0A4'];
+    const SAMPLE_CSV = [
+      'Month,Sales,Expenses',
+      'January,4200,1800',
+      'February,3800,1600',
+      'March,5100,2100',
+      'April,4600,1900',
+      'May,5300,2300',
+      'June,6100,2500',
+    ].join('\n');
+    let headers = [], rows = [], chart = null, chartType = 'bar';
+    const $ = (s) => document.querySelector(s);
+    const $$ = (s) => Array.from(document.querySelectorAll(s));
+
+    /* toast — fade in/out only, auto-dismiss 3s */
+    let toastTimer;
+    function toast(msg, type = 'info') {
+      const t = $('#toast');
+      t.classList.remove('show', 'success', 'error', 'info');
+      $('#toast-msg').textContent = msg;
+      void t.offsetWidth; /* restart fade */
+      t.classList.add('show', type);
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    /* renderer status (static dot, no animation) */
+    function setOnline(online) {
+      const dot = $('#status-dot'), txt = $('#status-text');
+      if (online) {
+        dot.className = 'h-1.5 w-1.5 flex-none rounded-full bg-emerald-400';
+        txt.textContent = 'Renderer online';
+      } else {
+        dot.className = 'h-1.5 w-1.5 flex-none rounded-full bg-red-400';
+        txt.textContent = 'Renderer offline';
+      }
+    }
+    async function pingRenderer() {
+      try { const res = await fetch(HEALTH_URL); setOnline(res.ok); }
+      catch { setOnline(false); }
+    }
+
+    /* number formatting: 1234567 -> 1,234,567 */
+    function formatBytes(n) {
+      if (n === null || n === undefined || Number.isNaN(n)) return '—';
+      const u = ['B', 'KB', 'MB', 'GB'];
+      let i = 0;
+      while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+      return (i === 0 ? String(n) : n.toFixed(1)) + ' ' + u[i];
+    }
+    function fmtInt(v) {
+      const s = String(v).trim();
+      return /^-?\d{4,}$/.test(s) ? Number(s).toLocaleString('en-US') : s;
+    }
+    function fmtTick(v) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n.toLocaleString('en-US') : v;
+    }
+
+    /* CSV parsing (RFC-4180: quoted fields, "" escapes, CRLF) */
+    function parseCSV(text) {
+      text = text.replace(/^\uFEFF/, '');
+      const out = [];
+      let r = [], f = '', q = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i], n = text[i + 1];
+        if (q) {
+          if (c === '"' && n === '"') { f += '"'; i++; }
+          else if (c === '"') q = false;
+          else f += c;
+        } else if (c === '"') q = true;
+        else if (c === ',') { r.push(f); f = ''; }
+        else if (c === '\r') {}
+        else if (c === '\n') { r.push(f); out.push(r); r = []; f = ''; }
+        else f += c;
+      }
+      if (f !== '' || r.length) { r.push(f); out.push(r); }
+      return out.filter((row) => row.some((cell) => String(cell).trim() !== ''));
+    }
+
+    /* 2D grid (array-of-arrays) -> { headers, rows } */
+    function gridToData(grid) {
+      const clean = grid.filter((r) => r.some((c) => String(c).trim() !== ''));
+      if (clean.length < 2) throw new Error('need a header row + at least one data row');
+      const hs = clean[0].map((h, i) => String(h).trim() || ('column_' + (i + 1)));
+      const rs = clean.slice(1).map((r) => hs.map((_, i) => String(r[i] ?? '').trim()));
+      return { headers: hs, rows: rs };
+    }
+
+    /* Excel (.xls/.xlsx) via SheetJS — first sheet, 2D output */
+    function parseExcel(buf) {
+      const wb = XLSX.read(buf, { type: 'array' });
+      const names = wb.SheetNames || [];
+      if (!names.length) throw new Error('workbook contains no sheets');
+      const sheetName = names[0];
+      const grid = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '', blankrows: false });
+      const data = gridToData(grid);
+      data.sheetName = sheetName;
+      data.sheetCount = names.length;
+      return data;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    /* file handling — CSV or Excel dispatch */
+    function handleFile(file) {
+      if (!file) return;
+      const isCsv = /\.csv$/i.test(file.name);
+      const isXl = /\.(xls|xlsx)$/i.test(file.name);
+      if (!isCsv && !isXl) { toast('Unsupported file type — use .csv, .xls or .xlsx', 'error'); return; }
+      if (isXl) {
+        const rd = new FileReader();
+        rd.onload = (e) => {
+          try { loadData(parseExcel(new Uint8Array(e.target.result)), file); }
+          catch (err) { toast('Could not read Excel file: ' + err.message, 'error'); }
+        };
+        rd.onerror = () => toast('Could not read file', 'error');
+        rd.readAsArrayBuffer(file);
+        return;
+      }
+      const rd = new FileReader();
+      rd.onload = (e) => {
+        try { loadData(gridToData(parseCSV(e.target.result)), file); }
+        catch (err) { toast('Could not parse CSV: ' + err.message, 'error'); }
+      };
+      rd.onerror = () => toast('Could not read file', 'error');
+      rd.readAsText(file);
+    }
+
+    function loadExample() {
+      loadData(gridToData(parseCSV(SAMPLE_CSV)), { name: 'sample.csv', size: SAMPLE_CSV.length });
+    }
+
+    /* sidebar file info + multi-sheet note */
+    function renderFileInfo(data, file) {
+      $('#fi-name').textContent = file.name;
+      $('#fi-name').title = file.name;
+      $('#fi-size').textContent = formatBytes(file.size);
+      $('#fi-rows').textContent = rows.length.toLocaleString('en-US');
+      $('#fi-cols').textContent = String(headers.length);
+      $('#file-info').classList.remove('hidden');
+      const sn = $('#sheet-note');
+      if (data.sheetCount > 1) {
+        $('#sheet-name').textContent = data.sheetName + ' (1 of ' + data.sheetCount + ')';
+        sn.classList.remove('hidden');
+      } else { sn.classList.add('hidden'); }
+    }
+
+    /* preview table — first 10 rows, sticky header, mono cells */
+    function renderPreview() {
+      const MAX = 10;
+      const shown = rows.slice(0, MAX);
+      $('#table-head').innerHTML = '<tr>' + headers.map((h) =>
+        '<th scope="col" class="whitespace-nowrap border-b border-line px-3 py-2 text-left font-medium text-muted">' + escapeHtml(h) + '</th>').join('') + '</tr>';
+      $('#table-body').innerHTML = shown.map((r) =>
+        '<tr>' + r.map((c) => '<td class="whitespace-nowrap border-b border-line/60 px-3 py-2 text-fg">' + escapeHtml(fmtInt(c)) + '</td>').join('') + '</tr>').join('');
+      $('#row-count').textContent = rows.length > MAX
+        ? ('first ' + MAX + ' of ' + rows.length.toLocaleString('en-US') + ' rows')
+        : (rows.length.toLocaleString('en-US') + ' rows');
+    }
+
+    function populateSelects() {
+      const x = $('#x-axis'), y = $('#y-axis');
+      x.innerHTML = y.innerHTML = '';
+      const isNum = headers.map((h, i) => rows.some((r) => String(r[i]).trim() !== '' && !isNaN(parseFloat(r[i]))));
+      headers.forEach((h, i) => {
+        x.add(new Option(h, h));
+        if (isNum[i]) y.add(new Option(h, h)); /* Y axis only accepts numeric columns */
+      });
+      x.value = headers.find((h, i) => !isNum[i]) || headers[0];
+      y.value = headers.find((h, i) => isNum[i]) || headers[0];
+    }
+
+    function loadData(data, file) {
+      headers = data.headers; rows = data.rows;
+      renderPreview();
+      populateSelects();
+      renderFileInfo(data, file);
+      $('#empty-state').style.display = 'none';
+      $('#fi-empty').classList.add('hidden');
+      $('#generate-btn').disabled = false;
+      toast('Loaded ' + rows.length.toLocaleString('en-US') + ' rows', 'success');
+    }
+
+    /* muted chart theme — applied client-side; renderer stays untouched */
+    function applyChartTheme(config) {
+      const ds = (config.data && config.data.datasets) || [];
+      ds.forEach((d, i) => {
+        const c = MUTED[i % MUTED.length];
+        if (config.type === 'pie') {
+          d.backgroundColor = d.data.map((_, j) => MUTED[j % MUTED.length]);
+          d.borderColor = '#0A0A0A';
+        } else if (config.type === 'bar' || config.type === 'scatter') {
+          d.backgroundColor = c; d.borderColor = c;
+        } else {
+          d.borderColor = c; d.backgroundColor = c + '30';
+          d.pointBackgroundColor = c; d.fill = config.type === 'area';
+        }
+      });
+      const o = config.options || (config.options = {});
+      o.layout = Object.assign({}, o.layout, { padding: 8 });
+      o.plugins = o.plugins || {};
+      const lg = o.plugins.legend || (o.plugins.legend = {});
+      lg.labels = Object.assign({}, lg.labels, { color: '#A3A3A3' });
+      o.plugins.tooltip = Object.assign({}, o.plugins.tooltip, {
+        backgroundColor: '#141414', titleColor: '#EDEDED', bodyColor: '#A3A3A3',
+        borderColor: '#262626', borderWidth: 1, padding: 8, displayColors: false,
+      });
+      if (config.type !== 'pie' && o.scales) {
+        ['x', 'y'].forEach((k) => {
+          const sc = o.scales[k] || (o.scales[k] = {});
+          sc.grid = { color: 'rgba(255,255,255,.06)' };
+          sc.ticks = Object.assign({}, sc.ticks, { color: '#737373', callback: fmtTick });
+        });
+      }
+      return config;
+    }
+
+    function drawChart(config) {
+      if (chart) chart.destroy();
+      applyChartTheme(config);
+      $('#chart-error').classList.add('hidden');
+      $('#chart-empty').style.display = 'none';
+      $('#chart-card').style.display = 'flex';
+      chart = new Chart($('#chart-canvas').getContext('2d'), config);
+    }
+
+    /* generate chart via the local renderer */
+    async function generateChart() {
+      const xAxis = $('#x-axis').value;
+      const yAxis = $('#y-axis').value;
+      if (!xAxis || !yAxis) { toast('Select an X column and a Y column', 'info'); return; }
+      /* Y axis must be numeric — guard even if the dropdown is filtered */
+      if (!hasNumbers(headers.indexOf(yAxis))) {
+        const names = headers.filter((h, i) => hasNumbers(i));
+        const box = $('#chart-error');
+        box.textContent = "Y axis must be a numeric column — '" + yAxis + "' has text values";
+        box.classList.remove('hidden');
+        $('#chart-empty').style.display = 'flex';
+        $('#chart-card').style.display = 'none';
+        if (chart) { chart.destroy(); chart = null; }
+        toast('Y axis needs numbers' + (names.length ? ' — pick ' + names.join(' or ') : ''), 'info');
+        return;
+      }
+      const btn = $('#generate-btn');
+      btn.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+      $('#gen-spin').classList.remove('hidden');
+      try {
+        const objRows = rows.map((r) => {
+          const o = {};
+          headers.forEach((h, i) => { o[h] = r[i]; });
+          return o;
+        });
+        const res = await fetch(RENDERER_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: chartType, xAxis: xAxis, yAxis: yAxis, rows: objRows }),
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          const e = new Error(body.error || ('status ' + res.status));
+          e.fromServer = true;
+          throw e;
+        }
+        drawChart(body);
+        setOnline(true);
+      } catch (err) {
+        const box = $('#chart-error');
+        if (err.fromServer) {
+          /* validation error from the renderer — it is running fine */
+          box.textContent = err.message;
+          toast(err.message, 'error');
+        } else {
+          /* network failure — renderer likely not started */
+          setOnline(false);
+          box.textContent = err.message + ' — is the renderer running? Start it with: python renderer.py';
+        }
+        box.classList.remove('hidden');
+        $('#chart-empty').style.display = 'flex';
+        $('#chart-card').style.display = 'none';
+        if (chart) { chart.destroy(); chart = null; }
+      } finally {
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+        $('#gen-spin').classList.add('hidden');
+      }
+    }
+
+    /* chart-type dropdown — label + icon swap */
+    function setType(value) {
+      chartType = value;
+      const t = CHART_TYPES.find((c) => c.value === value) || CHART_TYPES[0];
+      $('#type-label').textContent = t.label;
+      $('#type-icon').setAttribute('data-lucide', t.icon);
+      $('#chart-type').value = value;
+      lucide.createIcons();
+    }
+
+    /* dropdown open/close — shared (also rotates the chevron) */
+    function setMenu(open) {
+      $('#type-menu').style.display = open ? 'block' : 'none';
+      $('#type-btn').setAttribute('aria-expanded', String(open));
+      $('#type-chevron').classList.toggle('rotate-180', open);
+    }
+
+    /* true if column i holds at least one numeric value */
+    function hasNumbers(i) {
+      return i >= 0 && i < headers.length && rows.some((r) => String(r[i]).trim() !== '' && !isNaN(parseFloat(String(r[i]))));
+    }
+
+    /* scatter needs a numeric X column — switch automatically when possible */
+    function allNumeric(i) {
+      return rows.length > 0 && rows.every((r) => !isNaN(parseFloat(String(r[i]))));
+    }
+    function ensureScatterX() {
+      if (chartType !== 'scatter') return;
+      const x = $('#x-axis');
+      if (allNumeric(headers.indexOf(x.value))) return;
+      const idx = headers.findIndex((h, i) => allNumeric(i));
+      if (idx > -1) {
+        x.value = headers[idx];
+        toast('Switched X axis to ' + headers[idx] + ' — scatter needs numbers', 'info');
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+      Chart.defaults.font.size = 11;
+      Chart.defaults.color = '#737373';
+      lucide.createIcons();
+      setType('bar');
+
+      const dz = $('#dropzone'), fi = $('#file-input');
+      fi.setAttribute('accept', ACCEPT);
+      const menu = $('#type-menu'), tbtn = $('#type-btn');
+
+      dz.addEventListener('click', () => fi.click());
+      dz.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fi.click(); }
+      });
+      fi.addEventListener('change', (e) => { handleFile(e.target.files[0]); e.target.value = ''; });
+      ['dragenter', 'dragover'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('drag'); }));
+      ['dragleave', 'drop'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove('drag'); }));
+      dz.addEventListener('drop', (e) => handleFile(e.dataTransfer.files[0]));
+
+      $('#sample-btn').addEventListener('click', () => {
+        try { loadExample(); } catch (err) { toast(err.message, 'error'); }
+      });
+      $('#generate-btn').addEventListener('click', generateChart);
+      $('#kbd-upload').addEventListener('click', () => fi.click());
+
+      /* chart-type dropdown: open/close, select, outside-click close */
+      tbtn.addEventListener('click', () => setMenu(menu.style.display !== 'block'));
+      $$('.type-opt').forEach((b) => b.addEventListener('click', () => {
+        setType(b.dataset.type);
+        ensureScatterX();
+        setMenu(false);
+      }));
+      document.addEventListener('click', (e) => {
+        if (menu.style.display === 'block' && !menu.contains(e.target) && !tbtn.contains(e.target)) setMenu(false);
+      });
+
+      /* keyboard: ⌘K / Ctrl+K upload, Escape closes menu + toast */
+      document.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); fi.click(); }
+        if (e.key === 'Escape') { setMenu(false); $('#toast').classList.remove('show'); }
+      });
+
+      pingRenderer();
+    });
+  </script>
+</body>
+</html>

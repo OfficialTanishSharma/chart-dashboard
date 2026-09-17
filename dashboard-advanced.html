@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DataViz — CSV to Charts Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased selection:bg-indigo-500/40">
+
+  <!-- ===== Header ===== -->
+  <header class="sticky top-0 z-10 border-b border-slate-800 bg-slate-900/70 backdrop-blur">
+    <div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+      <div class="flex items-center gap-3">
+        <div class="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-lg">📊</div>
+        <div>
+          <h1 class="text-base font-semibold tracking-tight">DataViz Dashboard</h1>
+          <p class="text-xs text-slate-400">Upload a CSV → preview the table → render bar / line / pie charts</p>
+        </div>
+      </div>
+      <span id="renderer-badge" class="rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-400">renderer: checking…</span>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-6xl space-y-6 px-6 py-8">
+
+    <!-- ===== Upload ===== -->
+    <section class="rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
+      <div id="dropzone" class="cursor-pointer rounded-xl border-2 border-dashed border-slate-700 p-10 text-center transition hover:border-indigo-500 hover:bg-slate-800/30">
+        <div class="mb-3 text-4xl">🗂️</div>
+        <p class="font-medium">Drop your CSV here or <span class="text-indigo-400 underline">browse</span></p>
+        <p class="mt-1 text-xs text-slate-500">.csv files only · data stays in your browser</p>
+        <input id="file-input" type="file" accept=".csv" class="hidden" />
+      </div>
+      <div class="mt-4 flex flex-wrap items-center gap-3 text-sm">
+        <button id="sample-btn" class="rounded-lg border border-slate-700 px-4 py-2 text-slate-300 transition hover:border-indigo-500 hover:text-white">✨ Load sample data</button>
+        <span id="file-name" class="text-slate-500"></span>
+      </div>
+    </section>
+
+    <!-- ===== Controls ===== -->
+    <section id="controls-card" class="hidden rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
+      <div class="grid gap-5 md:grid-cols-3">
+        <div>
+          <label class="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-400">Chart type</label>
+          <div class="flex gap-2">
+            <button data-type="bar" class="type-btn active flex-1 rounded-lg border border-slate-700 px-3 py-2 text-sm transition">Bar</button>
+            <button data-type="line" class="type-btn flex-1 rounded-lg border border-slate-700 px-3 py-2 text-sm transition">Line</button>
+            <button data-type="pie" class="type-btn flex-1 rounded-lg border border-slate-700 px-3 py-2 text-sm transition">Pie</button>
+          </div>
+        </div>
+        <div>
+          <label for="x-axis" class="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-400">X axis (category)</label>
+          <select id="x-axis" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-indigo-500"></select>
+        </div>
+        <div>
+          <label for="y-axis" class="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-400">Y axis (values)</label>
+          <select id="y-axis" multiple size="3" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-indigo-500"></select>
+          <p class="mt-1 text-[11px] text-slate-500">Ctrl/Cmd-click to multi-select · pie uses the first column</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Chart ===== -->
+    <section id="chart-card" class="hidden rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
+      <div class="mb-4 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-slate-300">Chart preview</h2>
+        <button id="download-btn" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-indigo-500 hover:text-white">⬇ Download PNG</button>
+      </div>
+      <div class="h-80 rounded-lg bg-slate-950/60 p-3 sm:h-96">
+        <canvas id="chart-canvas"></canvas>
+      </div>
+    </section>
+
+    <!-- ===== Table ===== -->
+    <section id="table-card" class="hidden rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
+      <div class="mb-4 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-slate-300">Data preview</h2>
+        <span id="row-count" class="text-xs text-slate-500"></span>
+      </div>
+      <div class="max-h-80 overflow-auto rounded-lg border border-slate-800">
+        <table class="w-full border-collapse text-sm">
+          <thead id="table-head" class="sticky top-0 bg-slate-800 text-left"></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="toast" class="fixed bottom-6 right-6 hidden rounded-lg border px-4 py-3 text-sm shadow-lg"></div>
+
+  <script src="csv.js"></script>
+  <script src="chart-local.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
