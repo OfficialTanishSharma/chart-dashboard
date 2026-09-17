@@ -468,7 +468,13 @@
         ['x', 'y'].forEach((k) => {
           const sc = o.scales[k] || (o.scales[k] = {});
           sc.grid = { color: 'rgba(255,255,255,.06)' };
-          sc.ticks = Object.assign({}, sc.ticks, { color: '#737373', callback: fmtTick });
+          /* fmtTick is for numbers only. On a category X axis (bar/line/area)
+             Chart.js passes the tick *index* as the value (0,1,2,...), so a
+             custom callback would overwrite the real labels with indices.
+             Only the numeric Y axis - and both axes of a scatter - get it. */
+          const t = { color: '#737373' };
+          if (k === 'y' || config.type === 'scatter') t.callback = fmtTick;
+          sc.ticks = Object.assign({}, sc.ticks, t);
         });
       }
       return config;
